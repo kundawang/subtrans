@@ -24,6 +24,7 @@ import (
 	"fmt"
 
 	"github.com/heartleo/subtrans/internal/config"
+	"github.com/heartleo/subtrans/internal/glossary"
 	"github.com/heartleo/subtrans/internal/openai"
 	"github.com/heartleo/subtrans/internal/subtitle"
 	_ "github.com/heartleo/subtrans/internal/subtitle/all" // register all codecs
@@ -35,6 +36,14 @@ var (
 	ErrEmptyContent          = errors.New("subtrans: srt content is empty")
 	ErrInvalidConfig         = errors.New("subtrans: invalid config")
 	ErrTranslationIncomplete = errors.New("subtrans: translation incomplete")
+	// ErrInvalidGlossary wraps glossary validation failures (see
+	// [WithGlossary]).
+	ErrInvalidGlossary = glossary.ErrInvalidGlossary
+	// ErrGlossaryPlaceholder wraps failures to protect or restore a glossary
+	// term. Translate returns it when placeholders are still broken after all
+	// retries — for example source text that forges reserved placeholder
+	// syntax, or a model that keeps dropping a placeholder.
+	ErrGlossaryPlaceholder = glossary.ErrPlaceholderInvalid
 )
 
 // Default connection-level settings, exposed for callers that wish to inspect
@@ -126,6 +135,14 @@ func (t *Translator) Translate(ctx context.Context, srtContent string, language 
 		return nil, fmt.Errorf("subtrans: %w", err)
 	}
 
+	var table *glossary.Table
+	if len(o.glossary) > 0 {
+		table, err = glossary.New(o.glossary, glossary.Options{CaseInsensitive: o.glossaryCaseFold})
+		if err != nil {
+			return nil, fmt.Errorf("subtrans: %w: %w", ErrInvalidGlossary, err)
+		}
+	}
+
 	doc, err := codec.Parse(srtContent)
 	if err != nil {
 		return nil, fmt.Errorf("parse subtitle: %w", err)
@@ -139,6 +156,7 @@ func (t *Translator) Translate(ctx context.Context, srtContent string, language 
 		BatchSplitPunctuation:    o.batchSplitPunctuation,
 		IncludeOriginal:          o.includeOriginal,
 		StripTrailingPunctuation: o.stripPunctuation,
+		Glossary:                 table,
 	}
 
 	batches := translator.BatchLines(doc.Lines, ops)

@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/heartleo/subtrans/internal/config"
+	"github.com/heartleo/subtrans/internal/glossary"
 	"github.com/heartleo/subtrans/internal/subtitle"
 	_ "github.com/heartleo/subtrans/internal/subtitle/all" // register codecs
 	"github.com/heartleo/subtrans/internal/translator"
@@ -86,6 +87,22 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	opts.TargetLanguage = language
 	opts.Prompt = r.FormValue("prompt")
 	opts.Instructions = r.FormValue("instructions")
+
+	if g := strings.TrimSpace(r.FormValue("glossary")); g != "" {
+		entries, parseErr := glossary.Parse([]byte(g))
+		if parseErr != nil {
+			writeJSON(w, http.StatusBadRequest, parseErr.Error())
+			return
+		}
+		table, tableErr := glossary.New(entries, glossary.Options{
+			CaseInsensitive: r.FormValue("glossary_case_insensitive") == "true",
+		})
+		if tableErr != nil {
+			writeJSON(w, http.StatusBadRequest, tableErr.Error())
+			return
+		}
+		opts.Glossary = table
+	}
 
 	batches := translator.BatchLines(doc.Lines, opts)
 	fmtOpts := subtitle.FormatOptions{

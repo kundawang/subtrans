@@ -113,9 +113,13 @@ func BuildRetryPrompt(batchLines []*Line, missingNums []int, opts Options) ([]Me
 	var missingSeqNums []string
 	for i, l := range retryLines {
 		seqNum := i + 1
-		entry := subtitleInput{Number: seqNum, Text: l.Text}
+		entry := subtitleInput{Number: seqNum, Text: l.promptText()}
 		if !missingSet[l.Number] && l.Translation != "" {
-			entry.Translation = l.Translation // context-only line
+			// Context-only lines are already translated and restored: send the
+			// original source text, not this batch's placeholder form, so stale
+			// tokens are never echoed back into the model's output.
+			entry.Text = l.Text
+			entry.Translation = l.Translation
 		} else {
 			missingSeqNums = append(missingSeqNums, strconv.Itoa(seqNum))
 		}
@@ -159,6 +163,9 @@ func buildUserContent(lines []*Line, ctx PromptContext, opts Options) string {
 		b.WriteString(batchContextHeader)
 		ctxInput := make([]subtitleInput, len(ctx.ContextLines))
 		for i, l := range ctx.ContextLines {
+			// Context comes from an already-translated batch: send its original
+			// source text and final translation. Placeholders from that batch's
+			// session are deliberately not reused here.
 			ctxInput[i] = subtitleInput{Number: i + 1, Text: l.Text, Translation: l.Translation}
 		}
 		b.Write(mustMarshal(ctxInput))
@@ -172,7 +179,7 @@ func buildUserContent(lines []*Line, ctx PromptContext, opts Options) string {
 	// Sequential 1-based indices within this batch.
 	input := make([]subtitleInput, len(lines))
 	for i, line := range lines {
-		input[i] = subtitleInput{Number: i + 1, Text: line.Text}
+		input[i] = subtitleInput{Number: i + 1, Text: line.promptText()}
 	}
 	b.Write(mustMarshal(input))
 

@@ -132,6 +132,57 @@ f, _ := subtrans.DetectFormat("input.lrc")
 t.Translate(ctx, content, "zh", subtrans.WithFormat(f))
 ```
 
+### Glossary (fixed term translations)
+
+Machine translation often renders character and place names inconsistently — or
+as ordinary words (e.g. "Storm King" → "风暴王"). A glossary pins source terms to
+fixed target strings and protects them from the model:
+
+```go
+result, err := t.Translate(ctx, content, "zh", subtrans.WithGlossary(
+	subtrans.GlossaryEntry{Source: "Aria", Target: "阿莉娅"},
+	subtrans.GlossaryEntry{Source: "Storm King", Target: "风暴之王"},
+))
+
+// Parse a glossary file (JSON or "source=target" lines) instead.
+entries, _ := subtrans.ParseGlossary(data)
+t.Translate(ctx, content, "zh", subtrans.WithGlossary(entries...))
+
+// Optional: match terms case-insensitively (Unicode simple fold).
+t.Translate(ctx, content, "zh", subtrans.WithGlossary(entries...),
+	subtrans.WithGlossaryCaseInsensitive(true))
+```
+
+Matching rules:
+
+- Literal, non-overlapping substring match. At each position the **longest**
+  term wins, so with both `Storm` and `Storm King` defined, `Storm King` is
+  matched as a whole. Matching resumes after the matched text.
+- **Case-sensitive** by default; `WithGlossaryCaseInsensitive` enables Unicode
+  case folding. Terms that differ only by case are then duplicates.
+- Terms are replaced with random per-batch placeholders before each API call
+  and restored afterwards. Timings, ASS styles/override blocks, VTT headers,
+  and all non-matching text are untouched. Without a glossary, translation is
+  byte-for-byte unchanged.
+
+Validation and fallbacks:
+
+- Empty source/target, newlines in a term, or the same source mapping to two
+  different targets → `ErrInvalidGlossary` **before any API call**. Identical
+  duplicate entries are de-duplicated.
+- Overlapping terms are resolved by the longest-match rule (not an error).
+- Subtitle text that already contains the reserved placeholder syntax is
+  rejected with `ErrGlossaryPlaceholder` instead of being trusted.
+- If the model drops, duplicates, or invents a placeholder, that line is
+  retried; if it still fails after all retries, `Translate` returns an error
+  wrapping `ErrTranslationIncomplete` and `ErrGlossaryPlaceholder`.
+
+**CLI** — pass a glossary file with `--glossary terms.json` (JSON object,
+`{"source":"target"}` array, or `source=target` lines; `#` comments allowed).
+Add `--glossary-case-insensitive` for case-folded matching. **Server** — send a
+`glossary` form field in the same formats plus optional
+`glossary_case_insensitive=true`.
+
 ## Supported Formats
 
 | Format | Extension     | Supported |
@@ -189,6 +240,8 @@ curl -X POST http://localhost:8091/translate \
 | `language`     | Target language ISO code                        | `zh`         |
 | `prompt`       | Custom user prompt                              | -            |
 | `instructions` | Custom system instructions                      | -            |
+| `glossary`     | Glossary (JSON or `source=target` lines)        | -            |
+| `glossary_case_insensitive` | Case-fold glossary matching        | `false`      |
 
 ## CLI Flags
 
@@ -209,6 +262,8 @@ Global flags (available on all subcommands):
 | `--batch-split-punct` |       | Punctuation for splitting                                     | `.`                    |
 | `--instructions`      |       | Path to instructions file                                     | -                      |
 | `--prompt`            |       | Custom user prompt                                            | -                      |
+| `--glossary`          |       | Path to glossary file (JSON or `source=target` lines)         | -                      |
+| `--glossary-case-insensitive` | | Match glossary terms case-insensitively                   | `false`                |
 | `--temperature`       |       | Temperature                                                   | `0.0`                  |
 | `--max-retries`       |       | API retry count                                               | `3`                    |
 | `--include-original`  |       | Include original text in output                               | `false`                |

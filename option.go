@@ -1,6 +1,12 @@
 package subtrans
 
-import "github.com/heartleo/subtrans/internal/subtitle"
+import (
+	"github.com/heartleo/subtrans/internal/glossary"
+	"github.com/heartleo/subtrans/internal/subtitle"
+)
+
+// GlossaryEntry is one source→target term pair. Use with [WithGlossary].
+type GlossaryEntry = glossary.Entry
 
 // Option configures translation behavior.
 // Use the With* functions to create options.
@@ -17,6 +23,8 @@ type options struct {
 	includeOriginal       bool
 	stripPunctuation      bool
 	format                subtitle.Format
+	glossary              []GlossaryEntry
+	glossaryCaseFold      bool
 }
 
 // formatOption selects the subtitle codec.
@@ -76,3 +84,32 @@ func (o stripPunctuationOption) apply(opts *options) { opts.stripPunctuation = b
 // WithStripPunctuation controls stripping trailing periods and commas from
 // translated text (default: true).
 func WithStripPunctuation(b bool) Option { return stripPunctuationOption(b) }
+
+// glossaryOption supplies glossary entries.
+type glossaryOption []GlossaryEntry
+
+func (o glossaryOption) apply(opts *options) { opts.glossary = append([]GlossaryEntry(nil), o...) }
+
+// WithGlossary adds source→target term pairs that must survive translation
+// unchanged. Terms are replaced with per-batch placeholders before each LLM
+// call and restored afterwards, so character names are never machine
+// translated and are spelled identically everywhere they occur.
+//
+// Matching is literal, non-overlapping, and longest-term-first, and is
+// case-sensitive unless [WithGlossaryCaseInsensitive] is also used.
+//
+// Invalid glossaries (empty source/target, duplicate source terms with
+// different targets, or terms containing newlines or reserved placeholder
+// syntax) make [Translator.Translate] return an error wrapping
+// [ErrInvalidGlossary] before any API call is made.
+func WithGlossary(entries ...GlossaryEntry) Option { return glossaryOption(entries) }
+
+// glossaryCaseFoldOption toggles case-insensitive term matching.
+type glossaryCaseFoldOption bool
+
+func (o glossaryCaseFoldOption) apply(opts *options) { opts.glossaryCaseFold = bool(o) }
+
+// WithGlossaryCaseInsensitive enables Unicode case-insensitive glossary
+// matching (default: false). Terms that differ only by case are treated as
+// duplicates by [WithGlossary] when this is enabled.
+func WithGlossaryCaseInsensitive(b bool) Option { return glossaryCaseFoldOption(b) }

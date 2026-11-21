@@ -51,6 +51,8 @@ func init() {
 	f.StringVarP(&translateModel, "model", "m", "", "model override")
 	f.StringVar(&translateInstructionsFile, "instructions", "", "path to instructions text file")
 	f.StringVar(&translatePrompt, "prompt", "", "custom user prompt prefix")
+	f.StringVar(&translateGlossaryFile, "glossary", "", "path to glossary file (JSON or source=target lines)")
+	f.BoolVar(&translateGlossaryFold, "glossary-case-insensitive", false, "match glossary terms case-insensitively")
 	f.IntVar(&translateMaxBatchSize, "max-batch-size", 30, "lines per batch")
 	f.StringVar(&translateBatchSplitPunct, "batch-split-punct", ".", "punctuation characters for batch splitting")
 	f.Float64Var(&translateTemperature, "temperature", 0.0, "LLM temperature")

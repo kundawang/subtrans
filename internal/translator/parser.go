@@ -7,6 +7,8 @@ import (
 	"log/slog"
 	"strings"
 	"unicode/utf8"
+
+	"github.com/heartleo/subtrans/internal/glossary"
 )
 
 // mergedLineRuneRatio is the rune-length ratio above which a translation is
@@ -68,6 +70,12 @@ func ParseResponse(raw string, lines []*Line) (ParseResult, error) {
 
 	for i, line := range lines {
 		seqNum := i + 1
+		if line.settled() {
+			// Glossary line already restored in an earlier round; a retry
+			// prompt includes it as context only. Never overwrite it with the
+			// unrestored placeholder text the model may echo back.
+			continue
+		}
 		t := trimmed[seqNum]
 		if t == "" {
 			slog.Warn("missing or empty translation for line", "line", line.Number)
@@ -76,8 +84,10 @@ func ParseResponse(raw string, lines []*Line) (ParseResult, error) {
 		}
 		// Detect merge: current translation disproportionately long AND
 		// next line's translation empty → content likely absorbed.
-		srcRunes := utf8.RuneCountInString(line.Text)
-		transRunes := utf8.RuneCountInString(t)
+		// Placeholders are ignored so glossary-protected terms do not skew
+		// the length comparison.
+		srcRunes := utf8.RuneCountInString(glossary.Strip(line.promptText()))
+		transRunes := utf8.RuneCountInString(glossary.Strip(t))
 		if i+1 < len(lines) && trimmed[seqNum+1] == "" && srcRunes > 0 &&
 			transRunes > srcRunes*mergedLineRuneRatio {
 			slog.Warn("suspected merged translation; retrying both lines",

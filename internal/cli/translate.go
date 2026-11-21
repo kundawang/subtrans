@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/heartleo/subtrans/internal/config"
+	"github.com/heartleo/subtrans/internal/glossary"
 	"github.com/heartleo/subtrans/internal/openai"
 	"github.com/heartleo/subtrans/internal/subtitle"
 	_ "github.com/heartleo/subtrans/internal/subtitle/all" // register codecs
@@ -20,6 +21,8 @@ var (
 	translateModel            string
 	translateInstructionsFile string
 	translatePrompt           string
+	translateGlossaryFile     string
+	translateGlossaryFold     bool
 	translateMaxBatchSize     int
 	translateBatchSplitPunct  string
 	translateTemperature      float64
@@ -79,6 +82,22 @@ func runTranslate(inputPath string) error {
 			return fmt.Errorf("read instructions: %w", err)
 		}
 		opts.Instructions = string(b)
+	}
+
+	if translateGlossaryFile != "" {
+		b, err := os.ReadFile(translateGlossaryFile) // #nosec G304
+		if err != nil {
+			return fmt.Errorf("read glossary: %w", err)
+		}
+		entries, err := glossary.Parse(b)
+		if err != nil {
+			return fmt.Errorf("glossary: %w", err)
+		}
+		table, err := glossary.New(entries, glossary.Options{CaseInsensitive: translateGlossaryFold})
+		if err != nil {
+			return fmt.Errorf("glossary: %w", err)
+		}
+		opts.Glossary = table
 	}
 
 	batches := translator.BatchLines(doc.Lines, opts)

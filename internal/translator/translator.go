@@ -42,6 +42,13 @@ func Translate(ctx context.Context, batches []*Batch, opts Options, completer Co
 			return wrapped
 		}
 
+		if err := protectBatch(batch, opts.Glossary); err != nil {
+			wrapped := fmt.Errorf("batch %d: %w", batch.Number, err)
+			batch.Errors = append(batch.Errors, wrapped)
+			handler.OnError(batch.Number, wrapped)
+			return wrapped
+		}
+
 		messages := BuildPrompt(batch.Lines, PromptContext{ContextLines: contextLines}, opts)
 		raw, err := completer.Complete(ctx, messages)
 		if err != nil {
@@ -52,6 +59,18 @@ func Translate(ctx context.Context, batches []*Batch, opts Options, completer Co
 
 		result, parseErr := ParseResponse(raw, batch.Lines)
 		batch.RawResponse = raw
+
+		var restoreErrs []error
+		if parseErr == nil {
+			restoreErrs = restoreBatch(batch.Lines)
+			if len(restoreErrs) > 0 {
+				slog.Warn("glossary restore rejected translations",
+					"batch", batch.Number, "errors", len(restoreErrs))
+				for _, re := range restoreErrs {
+					slog.Warn("glossary restore error", "batch", batch.Number, "error", re)
+				}
+			}
+		}
 
 		switch {
 		case errors.Is(parseErr, ErrNoMatches):
@@ -88,6 +107,14 @@ func Translate(ctx context.Context, batches []*Batch, opts Options, completer Co
 					"batch", batch.Number,
 					"attempt", attempt, "error", retryParseErr)
 			}
+			if retryParseErr == nil {
+				retryRestoreErrs := restoreBatch(retryLines)
+				restoreErrs = append(restoreErrs, retryRestoreErrs...)
+				for _, re := range retryRestoreErrs {
+					slog.Warn("glossary restore error",
+						"batch", batch.Number, "attempt", attempt, "error", re)
+				}
+			}
 
 			missingNums = collectMissingLines(batch.Lines)
 			slog.Info("retry result",
@@ -98,6 +125,9 @@ func Translate(ctx context.Context, batches []*Batch, opts Options, completer Co
 		if len(missingNums) > 0 {
 			fatal := fmt.Errorf("batch %d: %d lines still untranslated after %d retries: %v",
 				batch.Number, len(missingNums), maxTranslationRetries, missingNums)
+			if re := joinRestoreErrors(restoreErrs); re != nil {
+				fatal = fmt.Errorf("%w: %w", fatal, re)
+			}
 			slog.Error("translation incomplete, aborting",
 				"batch", batch.Number,
 				"missing_count", len(missingNums), "missing_lines", missingNums)
